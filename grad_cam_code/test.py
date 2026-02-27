@@ -1,3 +1,5 @@
+from grad_cam import *
+
 model = create_model('timm/resnet34.a1_in1k', pretrained=True)
 #model = create_model('timm/resnet14t.c3_in1k', pretrained=True)
 #model = create_model('timm/resnet10t.c3_in1k', pretrained=True)
