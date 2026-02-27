@@ -9,7 +9,7 @@ img_path = '/content/drive/MyDrive/ImageNet1k-Test-images/test3-hornbill.png'
 #img_path = '/content/drive/MyDrive/ImageNet1k-Test-images/test2-pug-dog.png'
 #img_path = '/content/drive/MyDrive/ImageNet1k-Test-images/test1-n01443537_goldfish.png'
 
-cam = GradCAM(model,img_path,layer_idx=2)
+cam = GradCAM(model,img_path,layer_idx=-2)
 cam()
 cam.imposing_visualization()
 cam.heatmap

@@ -9,12 +9,12 @@ import matplotlib.cm as cm
 import math
 
 class GradCAM:
-  def __init__(self,model,
+  def __init__(self,model: torch.nn.Module,
                img_path:str,
                layer_idx: int = 2,
-               input_shape = (224,224),
+               input_shape: tuple = (224,224),
                model_type: str = 'Normal',
-               auto_find_classfier = False,
+               auto_find_classfier: bool = False,
                ):
     """
     params:
@@ -38,9 +38,9 @@ class GradCAM:
     self.img_path = img_path
     self.input_shape = input_shape
     self.model_type = model_type
-    print('The model types you can select from are either \'Normal\' (CNN based), \'ViT\', \'SwinT\'')
+    print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', currently is {self.model_type} mode.')
 
-  def __call__(self, heatmap_threshold=8, transform: torch.Tensor=None):
+  def __call__(self, heatmap_threshold=8, transform: transforms.Compose=None):
     """
     Args:
         heatmap_threshold (int, optional): Defaults to 8. Must greater than 1, the bigger the value, the less highlights will be displayed. 
@@ -121,7 +121,7 @@ class GradCAM:
         #then normalize the heatmap and recale its value range from 0 to 255.
 
 
-  def origin_cam_visualization(self,save_path = None):
+  def origin_cam_visualization(self,save_path:str = None):
     #display the orignal size heatmap (H,W,1)
     plt.rcParams.update({'font.size': 14})
     plt.matshow(self.heatmap)
@@ -131,7 +131,7 @@ class GradCAM:
       plt.savefig(save_path)
 
 
-  def imposing_visualization(self,save_path = None):
+  def imposing_visualization(self,save_path:str = None):
     alpha = 0.8 #how much CAM will overlap on original image
     plt.figure(figsize = (20,20))
     plt.rcParams.update({'font.size': 18})
