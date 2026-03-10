@@ -7,14 +7,19 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import math
+import pdb
+
 
 class GradCAM:
   def __init__(self,model: torch.nn.Module,
-               img_path:str,
+               img_path:str = None,
+               img_value = None,
                layer_idx: int = 2,
                input_shape: tuple = (224,224),
                model_type: str = 'Normal',
+               transform: transforms.Compose=None,
                auto_find_classfier: bool = False,
+               verbose: bool = False
                ):
     """
     params:
@@ -36,11 +41,15 @@ class GradCAM:
             self.layer_idx = i
             break
     self.img_path = img_path
+    self.im_value = img_value
     self.input_shape = input_shape
     self.model_type = model_type
-    print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', currently is {self.model_type} mode.')
+    self.transform = transform
+    self.verbose = verbose
+    if self.verbose:
+      print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', currently is {self.model_type} mode.')
 
-  def __call__(self, heatmap_threshold=8, transform: transforms.Compose=None):
+  def __call__(self, heatmap_threshold=8,):
     """
     Args:
         heatmap_threshold (int, optional): Defaults to 8. Must greater than 1, the bigger the value, the less highlights will be displayed. 
@@ -50,15 +59,23 @@ class GradCAM:
     extractor = nn.Sequential(*list(model.children())[:self.layer_idx]) #truncate the model from where your specified idx
     classifier = nn.Sequential(*list(model.children())[self.layer_idx:])
     #print(extractor)
-    print(f'Try to visualize the layer before : \n {list(model.children())[self.layer_idx:]}')
+    if self.verbose:
+      print(f'Try to visualize the layer before : \n {classifier}')
 
-    img = Image.open(self.img_path).convert('RGB')
-    if transform == None:
-      transform = transforms.Compose([transforms.ToTensor()])
-      img = transform(img.resize(self.input_shape))
+    if self.im_value != None:
+      img = self.im_value
+    else:
+      img = Image.open(self.img_path).convert('RGB')
+      
+    if self.transform == None:
+      self.transform = transforms.Compose([transforms.ToTensor()])
+      img = self.transform(img.resize(self.input_shape))
     else: 
-      img = transform(img)
+      if self.verbose:
+        print('Use the custom transform you provided to preprocess the image')
+      img = self.transform(img)
     img = torch.unsqueeze(img, 0) #preprocess the image to tensor: (1,C,H,W)
+    self.img = img
     img.requires_grad = True
 
     result = model(img)
@@ -70,11 +87,13 @@ class GradCAM:
                                 #so here it needs to be specified to keep the gradient of activation w.r.t prediction logits
 
     certainty = nn.functional.softmax(result[0], dim=-1)[int(class_Idx)]
-    print(f'Activation Shape:{activations.shape}')
+    if self.verbose:
+      print(f'Activation Shape:{activations.shape}')
 
     prediction_logits = classifier(activations) #the activation is fed into rest layers to get the prediction tensor
-    print(f'Prediction_logits Shape:{prediction_logits.shape}')
-    print(f'The Grad-CAM will be plotted based on model prediction result: {class_Idx} with {certainty*100:.3}% certainty')
+    if self.verbose:
+      print(f'Prediction_logits Shape:{prediction_logits.shape}')
+      print(f'The Grad-CAM will be plotted based on model prediction result: {class_Idx} with {certainty*100:.3}% certainty')
 
     if self.model_type in ['Normal','SwinT']:
       prediction_logits = prediction_logits[:,class_Idx]  #only use the specific class to back propagate
@@ -97,7 +116,8 @@ class GradCAM:
       d_act = self.output_decompose_vit_grad_cam(d_act)
       activations = self.output_decompose_vit_grad_cam(activations[:,:,:])
 
-    print(f'gradient shape (predictioin logti(s) w.r.t. feature logits): {d_act.shape}')
+    if self.verbose:
+      print(f'gradient shape (predictioin logti(s) w.r.t. feature logits): {d_act.shape}')
     pooled_grads = torch.mean(d_act,dim = (0,1,2))  #according to the paper, the pooling happens all axis except the channel dim
 
     heatmap = activations.detach().numpy()[0] #for tensors where its requires_grad = True, need detach() function to convert to ndarray
@@ -106,11 +126,12 @@ class GradCAM:
     #back propagate
     for  i in range(d_act.shape[-1]):
       heatmap[:,:,i] *= pooled_grads[i]
-    print(f'Shape of weighted Combination between gradients and activations: {heatmap.shape}')
+    if self.verbose:
+      print(f'Shape of weighted Combination between gradients and activations: {heatmap.shape}')
     heatmap = np.sum(heatmap, axis = -1) #here the heatmap shapes as (H,W,1)
-    print(f'Shape after channel summation : {heatmap.shape}')
-
-    print(f'Maximum pixel value of heatmap is {heatmap.max()}')
+    if self.verbose:
+      print(f'Shape after channel summation : {heatmap.shape}')
+      print(f'Maximum pixel value of heatmap is {heatmap.max()}')
     
     ## Slightly increase the threshold:
     threshold = heatmap.max()/heatmap_threshold
@@ -131,14 +152,15 @@ class GradCAM:
       plt.savefig(save_path)
 
 
-  def imposing_visualization(self,save_path:str = None):
+  def imposing_visualization(self,save_path:str = None, denormalize:tuple[int, int] =None):
     alpha = 0.8 #how much CAM will overlap on original image
     plt.figure(figsize = (20,20))
     plt.rcParams.update({'font.size': 18})
 
     jet = cm.get_cmap('jet')  #create the color map object
     jet_colors = jet(np.arange(256))[:,:3]
-    print(f'jet_color shape: {jet_colors.shape}')
+    if self.verbose:
+      print(f'jet_color shape: {jet_colors.shape}')
     jet_colors = (jet_colors*256).astype(np.uint8)  #generate a color (RGB) image which has small H and W
                                                       # and maps the intensity to color from red to blue
 
@@ -146,23 +168,31 @@ class GradCAM:
     self.heatmap = Image.fromarray(self.heatmap).resize(self.input_shape, Image.Resampling.BILINEAR)
     jet_heatmap = (jet_colors[np.uint8(self.heatmap)] * alpha).astype(np.uint8)
 
-    img = Image.open(self.img_path).convert('RGB').resize(self.input_shape)
-
+    #if self.im_value != None:
+    #  img = self.im_value
+    #else:
+    #  img = Image.open(self.img_path).convert('RGB').resize(self.input_shape)
+    img = self.img.squeeze(0).permute(1,2,0).detach().numpy()  #(1,C,H,W) -> (H,W,C)
+    if denormalize != None:
+      img = self.denormalize(img, mean=denormalize[0], std=denormalize[1])
+    else:
+      img = (img - img.min()) / (img.max() - img.min()) * 255
     jet_heatmap = np.asarray(jet_heatmap)
 
     img_cam = np.asarray(img) + np.asarray(jet_heatmap)
+    #print(img_cam)
 
     plt.subplot(2,2,1)
     plt.xticks([])
     plt.yticks([])
-    plt.imshow(img)
+    plt.imshow(img/255)
     plt.title('Original Image')
 
 
     plt.subplot(2,2,2)
     plt.xticks([])
     plt.yticks([])
-    plt.imshow(img_cam) #print the overlapped image (origin + cam)
+    plt.imshow(img_cam/(255)) #print the overlapped image (origin + cam)
     plt.title('Overlapped Colormap Image')
 
     plt.subplot(2,2,3)
@@ -181,14 +211,13 @@ class GradCAM:
 
     if save_path != None:
       plt.savefig(save_path,bbox_inches = 'tight', pad_inches = 0.3)
-
       name = save_path.split('.')[0]
-
-      img.save(name+'-origin'+'.png')
-      Image.fromarray(img_cam).save(name+'-overlapped'+'.png')
+      pil_img = Image.fromarray(img.astype(np.uint8), 'RGB')
+      pil_img.save(name+'-original'+'.png')
+      #pdb.set_trace()
+      Image.fromarray(img_cam.astype(np.uint8)).save(name+'-overlapped'+'.png')
       self.heatmap.save(name+'-heatmap'+'.png')
-      Image.fromarray(jet_heatmap).save(name+'-colormap'+'.png')
-
+      Image.fromarray(jet_heatmap.astype(np.uint8)).save(name+'-colormap'+'.png')
       
 
   def output_decompose_vit_grad_cam(self, vit_input):
@@ -201,3 +230,9 @@ class GradCAM:
 
     #vit_output = vit_output.permute(0,3,1,2)
     return vit_output
+
+  def denormalize(self, np_array, mean, std):
+      #denormalize the image for visualization
+      denormalized = np_array * np.array(std) + np.array(mean)
+      denormalized = np.clip(denormalized *255, 0, 255)
+      return denormalized
