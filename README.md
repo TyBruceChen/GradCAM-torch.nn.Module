@@ -3,7 +3,7 @@
 Implementation of [GradCAM](https://arxiv.org/pdf/1610.02391): Visualize the weight's gradient-activation with respect to the prediction the model makes. Currently supports CNN, ViT, and Swin Transformer from [timm](https://github.com/huggingface/pytorch-image-models). The visualization includes: heatmap, RGB channel injected heatmap, overlapped image, and an overview image.
 
 <details>
-<summary>How the visualization looks like</summary>
+<summary>How the visualization looks like (SwinT)</summary>
 
 ![swt](img/swt_test.png)
 </details>
@@ -76,6 +76,7 @@ cam.imposing_visualization()
 
 ### Vision Transformer (ViT)
 
+> **Note** ViT ends by taking only the [cls] patch of the backbone (encoder) into encoder, may need modify for better visualization result 
 ```python
 from grad_cam_code.grad_cam import *
 from timm.data.transforms_factory import create_transform
@@ -88,7 +89,7 @@ model.eval()
 
 img_path = 'graphs/test_images/test2-pug-dog.png'
 
-cam = GradCAM(model, img_path, layer_idx=-1, model_type='ViT', transform=transform)
+cam = GradCAM(model, img_path, layer_idx=-4, model_type='ViT', transform=transform)
 cam(heatmap_threshold=5)
 cam.imposing_visualization()
 ```
