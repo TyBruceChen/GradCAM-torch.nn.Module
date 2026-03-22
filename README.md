@@ -1,5 +1,7 @@
 # GradCAM: Understand deep learning from high level and mathematical perspective
 
+❌ This version of handling ViT activation (through trucation) is problematic!
+
 Implementation of [GradCAM](https://arxiv.org/pdf/1610.02391): Visualize the weight's gradient-activation with respect to the prediction the model makes. Currently supports CNN, ViT, and Swin Transformer from [timm](https://github.com/huggingface/pytorch-image-models). The visualization includes: heatmap, RGB channel injected heatmap, overlapped image, and an overview image.
 
 <details>
