@@ -15,9 +15,9 @@ from collections import defaultdict
 
 class GradCAM:
   def __init__(self,model: torch.nn.Module,
+               layer_name: str,
                img_path:str = None,
                img_value = None,
-               layer_name: str = None,
                input_shape: tuple = (224,224),
                model_type: str = 'Normal',
                transform: transforms.Compose=None,
@@ -25,14 +25,14 @@ class GradCAM:
                ):
     """
     params:
-    layer_idx: the index of the layer where you want to visulize.
-    input_shape: the image shape to put into the model
     model: the model you want to visualize
-    img_path: the path of the tested image
+    layer_name: full name of the name intended for GradCAM
+    input_shape: the image shape to put into the model
+    img_path: the path of the tested image or
+      img_value: instead of path, apply a raw picture input
     model_type: some special model need addtional method to process the activations
       in order to get Grad-CAM. Currently, there's only function to handel vision
       transformer.
-    auto_find_classfier: automatically let gradcam find the classfier head by 'fier', 
       and visualize before this layer.
     """
     _hooked = False
