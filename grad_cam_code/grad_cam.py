@@ -52,7 +52,7 @@ class GradCAM:
     self.transform = transform
     self.verbose = verbose
     if self.verbose:
-      print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', currently is {self.model_type} mode.')
+      print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', \'DeiT\', currently is {self.model_type} mode.')
 
   def __call__(self, heatmap_threshold=8,):
     """
@@ -107,9 +107,12 @@ class GradCAM:
     elif self.model_type == 'SwinT':
       d_act = self.output_decompose_vit_grad_cam(d_act[:,:,:])
       activations = self.output_decompose_vit_grad_cam(activations[:,:,:])
-    elif self.model_type in ['ViT', 'SwinT']:
+    elif self.model_type == 'ViT':  # Here use the first dimension [0] as cls token embedding by default
       d_act = self.output_decompose_vit_grad_cam(d_act[:,1:,:])
       activations = self.output_decompose_vit_grad_cam(activations[:,1:,:])
+    elif self.model_type == 'DeiT': # Here use the first and second dimension [0:1] as cls and distillation token embeddings by default
+      d_act = self.output_decompose_vit_grad_cam(d_act[:,2:,:])
+      activations = self.output_decompose_vit_grad_cam(activations[:,2:,:])
 
     if self.verbose:
       print(f'gradient shape (predictioin logti(s) w.r.t. feature logits): {d_act.shape}')
