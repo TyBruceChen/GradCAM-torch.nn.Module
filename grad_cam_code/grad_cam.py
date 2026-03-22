@@ -9,37 +9,42 @@ import matplotlib.cm as cm
 import math
 import pdb
 
+import torch
+from collections import defaultdict
+
 
 class GradCAM:
   def __init__(self,model: torch.nn.Module,
+               layer_name: str,
                img_path:str = None,
                img_value = None,
-               layer_idx: int = 2,
                input_shape: tuple = (224,224),
                model_type: str = 'Normal',
                transform: transforms.Compose=None,
-               auto_find_classfier: bool = False,
                verbose: bool = False
                ):
     """
     params:
-    layer_idx: the index of the layer where you want to visulize.
-    input_shape: the image shape to put into the model
     model: the model you want to visualize
-    img_path: the path of the tested image
+    layer_name: full name of the name intended for GradCAM
+    input_shape: the image shape to put into the model
+    img_path: the path of the tested image or
+      img_value: instead of path, apply a raw picture input
     model_type: some special model need addtional method to process the activations
       in order to get Grad-CAM. Currently, there's only function to handel vision
       transformer.
-    auto_find_classfier: automatically let gradcam find the classfier head by 'fier', 
       and visualize before this layer.
     """
+    _hooked = False
+    self.hook = {'act':[], 'grad':[]}
+    for n, p in model.named_modules():
+        if n == layer_name:
+            p.register_forward_hook(self._hook_act)
+            p.register_full_backward_hook(self._hook_grad)
+            _hooked = True
+    if _hooked == False:
+       raise ValueError("Please give a full valid layer name, e.g.: blocks.10.drop_path2. You can use function print_layername to check it.")
     self.model = model
-    self.layer_idx = layer_idx
-    if auto_find_classfier == True:
-      for i, child in enumerate(model.children()):
-        if "fier" in child.__class__.__name__:
-            self.layer_idx = i
-            break
     self.img_path = img_path
     self.im_value = img_value
     self.input_shape = input_shape
@@ -47,7 +52,7 @@ class GradCAM:
     self.transform = transform
     self.verbose = verbose
     if self.verbose:
-      print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', currently is {self.model_type} mode.')
+      print(f'The model types you can select from are either\n \'Normal\' (CNN based), \'ViT\', \'SwinT\', \'DeiT\', currently is {self.model_type} mode.')
 
   def __call__(self, heatmap_threshold=8,):
     """
@@ -55,12 +60,6 @@ class GradCAM:
         heatmap_threshold (int, optional): Defaults to 8. Must greater than 1, the bigger the value, the less highlights will be displayed. 
     """
     model = self.model
-
-    extractor = nn.Sequential(*list(model.children())[:self.layer_idx]) #truncate the model from where your specified idx
-    classifier = nn.Sequential(*list(model.children())[self.layer_idx:])
-    #print(extractor)
-    if self.verbose:
-      print(f'Try to visualize the layer before : \n {classifier}')
 
     if self.im_value != None:
       img = self.im_value
@@ -76,45 +75,44 @@ class GradCAM:
       img = self.transform(img)
     img = torch.unsqueeze(img, 0) #preprocess the image to tensor: (1,C,H,W)
     self.img = img
-    img.requires_grad = True
-
+    img.requires_grad = True  # del
+    # ---------------------------------------------------------------------------------------
     result = model(img)
     class_Idx = torch.argmax(result)  #get the prediction category
       #the grad-cam will visualize the prediction towards a specific category. (Here is the model's prediction)
-
-    activations = extractor(img)  #get the activations (output features) from target layer
-    activations.retain_grad() #pytorch will automatically free the parameters' gradients that are not provided by user
-                                #so here it needs to be specified to keep the gradient of activation w.r.t prediction logits
-
-    certainty = nn.functional.softmax(result[0], dim=-1)[int(class_Idx)]
+    # ------------------------------------------------------------------------------------------
+    prediction_logits = result
+    #pdb.set_trace()
+    certainty = nn.functional.softmax(prediction_logits[0], dim=-1)[int(class_Idx)]
     if self.verbose:
-      print(f'Activation Shape:{activations.shape}')
-
-    prediction_logits = classifier(activations) #the activation is fed into rest layers to get the prediction tensor
-    if self.verbose:
-      print(f'Prediction_logits Shape:{prediction_logits.shape}')
+      print(f'Output logits shape: {result.shape}')
       print(f'The Grad-CAM will be plotted based on model prediction result: {class_Idx} with {certainty*100:.3}% certainty')
 
-    if self.model_type in ['Normal','SwinT']:
-      prediction_logits = prediction_logits[:,class_Idx]  #only use the specific class to back propagate
-    elif self.model_type == 'ViT':
-      prediction_logits = prediction_logits[:,:,class_Idx]
-
+    activations = self.hook['act'][0]
+    if self.verbose:
+      print(f'Activation Shape:{activations.shape}')
+    
+    prediction_logits = prediction_logits[:, class_Idx]
     grad_output = torch.ones_like(prediction_logits) # all gradient will be saved in the specified layer
     prediction_logits.backward(gradient = grad_output)  #according to pytorch, backward() should specify
                                                           #with a tensor which its length is the same as backward tensor
-                                                            #when the tensor contains more than one number
-    d_act = activations.grad  #get the gradient of activation from target layer w.r.t. the specified category
+                                                          #when the tensor contains more than one number, in conclusion:
+                                                          #gradient argument = dL/d(output_logit)
+    d_act = self.hook['grad'][0][0]
     if self.model_type == 'Normal':
       if len(d_act.shape) != 4:
         raise ValueError(f"""Input should be (B,C,H,W) dimension, but now only have {d_act.shape} dimension(s).\n This is usually due to the model ends with a pooling layer,\n please increase your output layer index by 1 (or to higher layer)""")
       d_act = d_act.permute(0,2,3,1)  #(1,C,H,W) -> (1,H,W,C)
       activations = activations.permute(0,2,3,1)
     elif self.model_type == 'SwinT':
-      pass
-    elif self.model_type == 'ViT':
-      d_act = self.output_decompose_vit_grad_cam(d_act)
+      d_act = self.output_decompose_vit_grad_cam(d_act[:,:,:])
       activations = self.output_decompose_vit_grad_cam(activations[:,:,:])
+    elif self.model_type == 'ViT':  # Here use the first dimension [0] as cls token embedding by default
+      d_act = self.output_decompose_vit_grad_cam(d_act[:,1:,:])
+      activations = self.output_decompose_vit_grad_cam(activations[:,1:,:])
+    elif self.model_type == 'DeiT': # Here use the first and second dimension [0:1] as cls and distillation token embeddings by default
+      d_act = self.output_decompose_vit_grad_cam(d_act[:,2:,:])
+      activations = self.output_decompose_vit_grad_cam(activations[:,2:,:])
 
     if self.verbose:
       print(f'gradient shape (predictioin logti(s) w.r.t. feature logits): {d_act.shape}')
@@ -123,8 +121,8 @@ class GradCAM:
     heatmap = activations.detach().numpy()[0] #for tensors where its requires_grad = True, need detach() function to convert to ndarray
     pooled_grads = pooled_grads.numpy()
 
-    #back propagate
-    for  i in range(d_act.shape[-1]):
+    # \alpha_k^c * A^k, k is i here: 
+    for i in range(d_act.shape[-1]):
       heatmap[:,:,i] *= pooled_grads[i]
     if self.verbose:
       print(f'Shape of weighted Combination between gradients and activations: {heatmap.shape}')
@@ -192,7 +190,7 @@ class GradCAM:
     plt.subplot(2,2,2)
     plt.xticks([])
     plt.yticks([])
-    plt.imshow(img_cam/(255)) #print the overlapped image (origin + cam)
+    plt.imshow(img_cam/(300)) #print the overlapped image (origin + cam)
     plt.title('Overlapped Colormap Image')
 
     plt.subplot(2,2,3)
@@ -236,3 +234,13 @@ class GradCAM:
       denormalized = np_array * np.array(std) + np.array(mean)
       denormalized = np.clip(denormalized *255, 0, 255)
       return denormalized
+    
+  def _hook_act(self, module, input, output):
+      self.hook['act'].append(output) # Detach and move to CPU to avoid memory issues
+          
+  def _hook_grad(self, module, input, output):
+      self.hook['grad'].append(output)
+    
+def print_layername(model: nn.ModuleDict):
+    for n, p in model.named_modules():
+        print(n)
